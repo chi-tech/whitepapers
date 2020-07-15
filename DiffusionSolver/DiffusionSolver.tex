@@ -87,7 +87,31 @@
 
 \newcommand{\bOmega}{\mathcal{D}}
 
-\setlength\parindent{0pt}
+%\setlength\parindent{0pt}
+
+%================== Custom commands
+\newcommand{\Omegabf}{\mathbf{\Omega}}
+\newcommand{\position}{\mathbf{r}}
+
+
+\newcommand{\beq}{\begin{equation*}
+\begin{aligned}}
+\newcommand{\eeq}{\end{aligned}
+\end{equation*}}
+
+\newcommand{\beqn}{\begin{equation}
+	\begin{aligned}}
+\newcommand{\eeqn}{\end{aligned}
+	\end{equation}}
+
+\newcommand{\bnabla}{\boldsymbol{\nabla}}
+\newcommand{\bvel}{\mathbf{u}}
+\newcommand{\pluseq}{\mathrel{+}=}
+\newcommand{\asteq}{\mathrel{*}=}
+
+%=================== Big cdot
+\newcommand*\bigcdot{\mathpalette\bigcdot@{.5}}
+\newcommand*\bigcdot@[2]{\mathbin{\vcenter{\hbox{\scalebox{#2}{$\m@th#1\bullet$}}}}}
 
 %================== Section numbers with equation numbers
 \numberwithin{equation}{section}
@@ -128,33 +152,518 @@
 \lhead{}
 \renewcommand{\footrulewidth}{0.4pt}
 
-\begin{comment}
+
 \tableofcontents
 \addtocontents{toc}{~\hfill\textbf{Page}\par}
+%
+%\listoffigures
+%\listoftables
 
-\listoffigures
-\listoftables
-
-\end{comment}
-\chead{Weak form}	
 
 %#########################################################################
+\chead{Introduction}
 \newpage
-\section{The Weak form of the general Diffusion Equation}
-The diffusion solver handles the solution of the diffusion equation of the form
+\section{Introduction}
+The ``generalized diffusion solver" in Chi-Tech is based on a well known partial differential equation known as the \textbf{diffusion equation}. This equation can be used to model the behavior of many physical systems and has been studied in great depth for many years by engineers, scientists and mathematicians. The equation for a single unknown, $\phi$, has the general time dependent linear form
 
-\begin{equation} \label{eq:diffeq}
--\nabla (D\nabla\phi) + \sigma_a \phi = q
+\begin{equation} \label{eq:general_diffeq}
+\frac{d\phi}{dt} = \bnabla \cdot (D\bnabla\phi) - \sigma \phi + q
 \end{equation}
 \newline
+and can be outfitted with a number of different boundary conditions including Dirichlet-type, Neumann-type, and Robin-type boundary conditions.
+Different spatial discretizations can be applied to the equation including Finite Difference (FD), Finite Volume (FV), Continuous Galerkin Finite Element Method (CFEM), and Discontinuous Galerkin Finite Element (DFEM). In Chi-Tech the available spatial discretizations are FV, CFEM and DFEM. Additionally, different time discretizations can be applied for which Chi-Tech for now supports Forward Euler, Backward Euler, and Crank-Nicholson.
+
+The steady state form of the diffusion equation will be used in this whitepaper to detail the different spatial discretization techniques and is denoted by
+
+\begin{equation} \label{eq:steady_diffeq}
+-\bnabla \cdot (D\bnabla\phi) + \sigma \phi = q.
+\end{equation}
+\newline
+This equation can be related to techniques contained in literature under certain conditions. When the removal term ($\sigma \phi$) is removed and $D{=}1$ then the equation becomes Poisson's equation 
+
+\begin{equation} \label{eq:poisson_eq}
+\bnabla \cdot (\bnabla\phi) = -q,
+\end{equation}
+\newline
+and if the spatial source term, $q$, is also removed then the equation becomes Laplace's equation
+
+\begin{equation} \label{eq:laplace_eq}
+\bnabla \cdot (\bnabla\phi) = 0.
+\end{equation}
+\newline 
+In both these forms the divergence of the gradient ($\bnabla\cdot\bnabla\phi$) is replaced by the Laplacian operator, $\bnabla^2$, which can generally denoted by the symbol $\Delta$ after which the following are equivalent 
+
+\begin{equation}
+\begin{aligned}
+\bnabla\cdot\bnabla\phi &= 0 \\ 
+\bnabla^2 \phi &=0 \\
+ \Delta\phi &= 0
+\end{aligned}
+\end{equation} 
+
+
+\newpage
+\chead{Finite Volume}
+\section{Finite Volume}
+\subsection{Discretization}
+The FV method associates only a single value of the unknown per cell, located at the cell centroid, and is discretized by first integrating equation \eqref{eq:steady_diffeq} over the cell volume
+
+\begin{equation}
+\begin{aligned}
+-\int_V \bnabla \cdot (D\bnabla\phi) \ dV + \int_V \sigma \phi \ dV = \int_V q \ dV
+\end{aligned}
+\end{equation}
+\newline
+after which we apply Gauss' divergence theorem to the first term
+
+\begin{equation}
+\begin{aligned}
+-\int_V \bnabla \cdot (D\bnabla\phi) \ dV = 
+-\int_S \mathbf{n} \cdot (D\bnabla\phi) \ dA
+\end{aligned}
+\end{equation}
+\newline 
+and then apply discretized integration over cell volume, $V$, and cell face areas, $A_f$,
+
+\begin{equation}\label{eq:fv_needface}
+\begin{aligned}
+-\sum_f \mathbf{A}_f \cdot (D\bnabla\phi)_f  + V (\sigma \phi) = V \ q,
+\end{aligned}
+\end{equation}
+\newline 
+where $\mathbf{A}_f = A_f \mathbf{n}_f$ is the face area vector. This formulation is not complete until we have a discretized expression for $(D\bnabla \phi)_f$. The problem in depicting the details of this term in a Finite Volume discretization scheme is that it has a tremendously simplistic representation on orthogonal grids, and a significantly more complicated representation in unstructured grids. Generally the prior (on orthogonal grids) exhibits 2nd order convergence, however, the latter requires more care because the possibility of skewed faces can cause the method to become less than 1st order accurate.
+\newline
+\newline 
+The next two sections are devoted to separately describe the discretization on orthogonal and unstructured grids, respectively. Ultimately the unstructured implementation will be used since it is unifying, however, the general process can be observed on the orthogonal grid detail.
+
+\newpage 
+\subsection{Discretization on Orthogonal grids}
+\subsubsection{Terminology}
+Figure \ref{fig:orthogonalgridfv} below contains a graphic depiction of orthogonal 2D cells which we will use the define numerous concepts.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.3\linewidth]{Figures/OrthogonalGridFV}
+\caption{Reference vector layout for neighboring cells on an orthogonal grid.}
+\label{fig:orthogonalgridfv}
+\end{figure}
 \noindent
-over the domain $\mathcal{D}$ and with any set of boundary conditions on the boundary $\partial \mathcal{D}$. This form is suitable for physical processes like heat transfer when $\sigma_a = 0$ and processes like neutron diffusion when $\sigma_a \ne 0$.
-\newline \newline
-We now proceed with multiplying with $\varphi_i$, a function mapping eq. \ref{eq:diffeq} to a trial space $\mathcal{D}_i$ for which we require that
+The points $\mathbf{P}$, $\mathbf{N}$ and $\mathbf{F}$ are the present-cell-, neighboring-cell- and adjoining-face-centroids, respectively. The vector $\mathbf{PF}$ is from $\mathbf{P}$ to $\mathbf{F}$ and its length is used as $d_{PF}$. Similarly the vector $\mathbf{PN}$ is used to define $d_{PN}$.
+
+\subsubsection{Weighted harmonic mean of a quantity $D$ at a face}
+Some quantities, like the diffusion coefficient, require the harmonic mean at the faces. For orthogonal grids this requires a weighted harmonic mean where the weight requires the definition of
+\beqn 
+r_O = \frac{d_{PF}}{d_{PN}}
+\eeqn 
+after which the harmonic mean is defined as
+\beqn
+D_f = \biggr( 
+\frac{r_O}{D_P} + 
+\frac{1-r_O}{D_P}
+\biggr)^{-1}
+\eeqn 
+
+\subsubsection{Flux of a gradient}
+With the definition of face diffusion coefficient the required term in equation \eqref{eq:fv_needface} becomes
+
+\beqn \label{eq:flux_of_gradient_ortho}
+\mathbf{A}_f \bigcdot (D\bnabla \phi)_f = 
+D_f\frac{A_f}{d_{PN}} 
+\biggr(
+\phi_N - \phi_P
+\biggr)
+\eeqn 
+
+\subsubsection{Assembling the linear system}
+We now proceed by inserting eq. \eqref{eq:flux_of_gradient_ortho} into eq. \eqref{eq:fv_needface}, and mark values at iteration $(n)$ to be implicit and values at $(n-1)$ as explicit,  to get
+
+\beqn
+-\sum_fD_f\frac{A_f}{d_{PN}} 
+\biggr(
+\phi_N - \phi_P
+\biggr)^{(n)}  + V \sigma \phi_P^{(n)} = V \ q_P^{(n-1)}
+\eeqn 
+
+\noindent 
+This can then be simplified into a coefficient formulation
+
+\beq 
+a_P \phi_P + \sum_f a_{Nf} \phi_N = b_N
+\eeq 
+\newline 
+where 
+\beq 
+a_P &= \sum_f D_f\frac{A_f}{d_{PN}}   + V \sigma \\
+a_{Nf} &= -D_f\frac{A_f}{d_{PN}} \\
+b_N &= V \ q_P^{(n-1)}
+\eeq 
+\newline 
+\noindent 
+The final process is to assemble this coefficient formulation for each cell $P$ where each index $N$ and $P$ maps to a given $i,j$ matrix or $i$ vector index. The methodology to obtain these $i,j$ indices requires some machinery to be developed relating to sparsity patterns which will be discussed next.
+
+
+\newpage 
+\subsection{Discretization on Unstructured grids}
+\subsubsection{Terminology}
+
+Figure \ref{fig:faceaverages} below contains a graphic depiction of unstructured 2D cells which we will use to define numerous concepts.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.5\linewidth]{Figures/FaceAverages}
+\caption{Reference vector layout for neighboring cells on an unstructured grid.}
+\label{fig:faceaverages}
+\end{figure}
+\noindent
+The points $\mathbf{P}$, $\mathbf{N}$ and $\mathbf{F}$ are the present-cell-, neighboring-cell- and adjoining-face-centroids, respectively. The vector $\mathbf{PN}$ is from $\mathbf{P}$ to $\mathbf{N}$, and the projection of $\mathbf{PF}$ onto $\mathbf{PN}$ is at point $\mathbf{F}_i$ (not actually at the intersection of $\mathbf{PN}$ with the face). The vector $\mathbf{e}_{PN}$ is the unit vector along $\mathbf{PN}$ computed from $\mathbf{PN}/d_{PN}$, where $d_{PN} = || \mathbf{PN} ||_2$. The vector $\mathbf{e}_t$ is the unit tangential vector formed from $\mathbf{e}_t = \mathbf{e}_{PN} - \mathbf{n}$, with $\mathbf{n}$ being the face normal. The distance from $\mathbf{P}$ to $\mathbf{F}_i$, $d_{PF_i}$, is computed as 
+$
+d_{PF_i} = \mathbf{PF} \ \bigcdot  \ \mathbf{e}_{PN}
+$, 
+and $\mathbf{F}_i = \mathbf{P} + d_{PF_i}  \ \mathbf{e}_{PN}$.
+
+%
+%\subsubsection{Linear interpolation of a quantity $\phi$ to a face, option 1}
+%A linear interpolation of any quantity $\phi$, to find $\phi_{f_i}$, can be determined by defining 
+%\beqn 
+%r_P = \frac{d_{PF_i}}{d_{PN}}
+%\eeqn 
+%from which 
+%\beqn \label{eq:linear_interpolation_nocorr}
+%\phi_{f_i} &= (1-r_P) \phi_P + (r_P)\phi_N.
+%\eeqn
+%This is however not the desired value at the cell centroid, i.e. $\phi_f$. To correct for this we can linearly interpolate the gradient of $\phi$ to $\mathbf{F}_i$ and extend towards $\mathbf{F}$ as
+%\beq 
+%\bnabla \phi_{f_i} = (1-r_P) \bnabla \phi_P + (r_P)\bnabla \phi_N
+%\eeq 
+%using the vector from $\mathbf{F}_i$ to $\mathbf{F}$, $\mathbf{F_iF}$, to get
+%\beqn \label{eq:linear_interpolation}
+%\phi_f \approx \phi_{f_i}
+%+ \bnabla \phi_{f_i} \bigcdot \mathbf{F_iF}
+%\eeqn
+%which can be used for the interpolation of the pressure and/or temperature. Note however, that this form is not suitable for the interpolation of the velocity, which requires special treatment.
+%
+%\subsubsection{Linear interpolation of a quantity $\phi$ to a face, option 2}
+%For quantities that are not very sensitive to variation in the direction of the face skewness,  one can apply a less accurate, but still suitable interpolation, by neglecting the gradients and using the normal distance to the face. This requires $r_f$ defined as
+%\beqn 
+%r_f = \frac{
+%\mathbf{PF} \bigcdot \mathbf{n}
+%}{
+%\mathbf{PF} \bigcdot \mathbf{n} +
+%\mathbf{FN} \bigcdot \mathbf{n}
+%}
+%\eeqn 
+%
+%which can then be used to linearly interpolated quantities as
+%\beqn \label{eq:linear_interpolation_nocorr2}
+%\phi_{f_i} &= (1-r_f) \phi_P + (r_f)\phi_N.
+%\eeqn
+
+\subsubsection{Weighted harmonic mean of a quantity $D$ at a face}
+Some quantities, like the diffusion coefficient, require the harmonic mean at the faces. For unstructured grids this requires a weighted harmonic mean where the weight requires the definition of
+\beqn 
+r_P = \frac{d_{PF_i}}{d_{PN}}
+\eeqn 
+after which the harmonic mean is defined as
+\beqn
+D_f = \biggr( 
+\frac{r_P}{D_P} + 
+\frac{1-r_P}{D_P}
+\biggr)^{-1}
+\eeqn 
+
+
+\vspace{0.5cm}
+\subsubsection{Flux of a gradient}
+We can now develop the computation of $\mathbf{A}_f \bigcdot (D_f \bnabla \phi)_f$. When we deal with skewed faces, this diffusion  term needs some treatment. In general, since the face is skewed, the flux at the cell face develops additional components other than the orthogonal component along the direction of $\mathbf{PN}$.  These additional components are not intuitive to understand. Refer to Figure \ref{fig:faceaveragesskewed} below for the following discussion.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\linewidth]{Figures/FaceAveragesSkewed}
+\caption{Decomposed areas for the interpolation of a gradient flux}
+\label{fig:faceaveragesskewed}
+\end{figure}
+
+Given that the correct way to approximate the flux across the face is to compute the gradient along its centroid, we require the gradient to be computed from $\phi_{P'}$ and $\phi_{N'}$ along the projected perpendicular area $A_p$. Additionally we need to compute the flux along the tangential area $A_t$. Including these terms within an implicit formulation is, however, cumbersome to say the least. Instead we include explicit corrections as described in \cite{Sezai}.
+\newline
+\newline
+Firstly, we formulate the fluxes at $\mathbf{P}'$ and $\mathbf{N}'$ (see the left schematic in Figure \ref{fig:faceaveragesskewed}) as 
+
+\beqn 
+\phi_{P'} &= \phi_P + (\bnabla \phi)_P^{(n-1)} \  \bigcdot  \ \mathbf{F_iF} \\
+\phi_{N'} &= \phi_N + (\bnabla \phi)_N^{(n-1)} \  \bigcdot \  \mathbf{F_iF}
+\eeqn 
+\newline
+where $\mathbf{F_iF}$ is the vector from $\mathbf{F}_i$ to $\mathbf{F}$ and the gradients are computed from the previous iteration's flux field. The perpendicular gradient term can then be computed from
+
+\beq 
+\biggr (
+\mathbf{A}_f \bigcdot (\bnabla \phi)_f 
+\biggr)_p
+&=
+\frac{A_p}{d_{PN}} \biggr ( \phi_{N'} - \phi_{P'} \biggr)
+\\
+&= \frac{A_p}{d_{PN}} \biggr ( \phi_{N} - \phi_{P} \biggr)
++  \frac{ A_p }{d_{PN}} \biggr ( (\bnabla \phi)_N  -  (\bnabla \phi)_P \biggr)^{(n-1)}
+\ \bigcdot \mathbf{F_iF} 
+\eeq 
+\newline 
+where $A_p = A_f / (\mathbf{e}_{PN} \bigcdot \mathbf{n})$. Secondly, the tangential component can be computed from 
+
+\beqn 
+\biggr (
+\mathbf{A}_f \bigcdot (\bnabla \phi)_f 
+\biggr)_t
+&= (\bnabla \phi)_F \bigcdot \mathbf{A}_t
+\\
+&\approx  (\bnabla \phi)_{F_i}^{(n-1)} \bigcdot \mathbf{A}_t
+\eeqn 
+\newline
+where $\mathbf{A}_t = \mathbf{A}_f - A_p \mathbf{e}_{PN}$ and the gradient at the face centroid is approximated by the gradient interpolated at $\mathbf{F}_i$ which is not an unreasonable approximation considering that cell skewness is normally minimized. 
+Putting it all together we have
+
+\beqn \label{eq:flux_of_gradient}
+\mathbf{A}_f \bigcdot (\bnabla \phi)_f 
+=
+ \frac{A_p}{d_{PN}} \biggr ( \phi_{N} - \phi_{P} \biggr)
++  \frac{ A_p }{d_{PN}} \biggr ( (\bnabla \phi)_N  -  (\bnabla \phi)_P \biggr)^{(n-1)}
+\ \bigcdot \mathbf{F_iF} 
++
+ (\bnabla \phi)_{F_i}^{(n-1)} \bigcdot \mathbf{A}_t
+\eeqn 
+\newline
+In these equations we require the explicit value of $(\bnabla \phi)^{n-1}$ which can be computed using different methods, i.e., Green-Gauss and Weighted least-squares. These two methods will now be detailed.
+
+\vspace{0.5cm}
+\subsubsection{Computing gradients using Green-Gauss}
+
+This formulation is identical to ``Option 3" of chapter 9.2 in the book by Moukalled et al. \cite{MMD}.
+The first order Green-Gauss approximation reduces essentially to a summation over faces.
+
+\beqn \label{eq:gradient_gg} 
+\bnabla \phi = \frac{1}{V} \sum_f \mathbf{A}_f \phi_f
+\eeqn 
+
+where $\phi_f$ is taken as a linear interpolation between the adjoining face's cells. This formulation poses some challenges when undetermined faces fluxes are encountered, as is the case with boundaries and unstructured meshes, and therefore we require an algorithm to compensate. Therefore the following algorithm is applied:
+
+\begin{enumerate}
+\item Compute $\bnabla \phi^{(n)}$ over the entire domain using $\frac{1}{V}\sum_f \mathbf{A}_f \phi_f$ where $\phi_f$ is computed from \eqref{eq:linear_interpolation} as
+\beq
+\phi_f &= 
+(1-r_P) \phi_P + (r_P)\phi_N + 
+\biggr [
+(1-r_P) \bnabla \phi_P + (r_P)\bnabla \phi_N
+\biggr ]^{(n-1)} \bigcdot \mathbf{F_iF}
+\eeq 
+and boundary faces are computed as
+\beq 
+\phi_b = \phi_P + \bnabla \phi_P^{(n-1)} \bigcdot  \ \mathbf{PF}
+\eeq 
+
+\item Compute $|| \bnabla \phi^{(n)} - \bnabla \phi^{(n-1)} ||_2$. If $|| \bnabla \phi^{(n)} - \bnabla \phi^{(n-1)} ||_2<\epsilon$ then terminate.
+
+\item Swap $\bnabla \phi^{(n)}$ and $\bnabla \phi^{(n-1)}$.
+\item Repeat 2 to 4.
+\end{enumerate}
+
+In most cases the iteration process adds little to the iterative performance and it can be sufficient to just terminate after a single iteration.
+
+
+\vspace{1cm}
+\subsubsection{Computing gradients using weighted Least-Squares}
+Section 9.3 in \cite{MMD} provides a very good description of how the weighted Least-Squares gradients are determined. In that formulation
+
+\beq
+\begin{Bmatrix}
+\sum_f w_f \mathbf{PN} \otimes \mathbf{PN} 
+\end{Bmatrix}
+\bnabla \phi_P
+=
+\sum_f
+\begin{bmatrix}
+w_f \mathbf{PN} (\phi_N - \phi_P)
+\end{bmatrix}
+\eeq   
+where
+\beq 
+w_f = \frac{1}{(|| \mathbf{PN} ||_2)^2}
+\eeq 
+and the term in $\{\}$ is a tensor. On boundaries, $\mathbf{PN}$ and $\phi_N$ is replaced by $\mathbf{PF}$ and $\phi_b$.
+\newline
+\newline
+Note that this results in a system that needs to solved for each cell.
+
+\vspace{0.5cm}
+\subsubsection{Assembling the linear system}
+With all the individual pieces of functionality established we can now determine how to assemble the linear system. We start with eq. \eqref{eq:fv_needface} where now we insert eq. \eqref{eq:flux_of_gradient}, and mark values at iteration $(n)$ to be implicit and values at $(n-1)$ as explicit, after which we get
+
+\begin{equation}
+\begin{aligned}
+-\sum_f D_f \biggr[
+\frac{A_p}{d_{PN}} \biggr ( \phi_{N} - \phi_{P} \biggr)^{(n)}
++  \frac{ A_p }{d_{PN}} \biggr ( (\bnabla \phi)_N  -  (\bnabla \phi)_P \biggr)^{(n-1)}
+\ \bigcdot \mathbf{F_iF} 
++
+ (\bnabla \phi)_{F_i}^{(n-1)} \bigcdot \mathbf{A}_t
+ \biggr]
+ + V \sigma \phi_P^{(n)} = V \ q_P^{(n-1)}
+\end{aligned}
+\end{equation}
+\noindent
+which we can arrange to have all the implicit values to the left
+
+\begin{equation}
+\begin{aligned}
+-\sum_f D_f \biggr[
+\frac{A_p}{d_{PN}} \biggr ( \phi_{N} - \phi_{P} \biggr)^{(n)}
+ \biggr]
+ + V \sigma \phi_P^{(n)} &= 
+ V \ q_P^{(n-1)} \\
+ &+
+ \sum_f  D_f\biggr[
+ \frac{ A_p }{d_{PN}} \biggr ( (\bnabla \phi)_N  -  (\bnabla \phi)_P \biggr)^{(n-1)}
+ \ \bigcdot \mathbf{F_iF} 
+ +
+  (\bnabla \phi)_{F_i}^{(n-1)} \bigcdot \mathbf{A}_t
+  \biggr].
+\end{aligned}
+\end{equation}
+\noindent
+This can be simplified into a coefficient formulation
+\begin{equation}
+\begin{aligned}
+a_P \phi_P + \sum_f a_{Nf} \phi_N = b_N
+\end{aligned}
+\end{equation}
+\noindent
+where
+\begin{equation} \label{eq:fv_coeffs}
+\begin{aligned}
+a_P &= \sum_f D_f \frac{A_p}{d_{PN}} + V\sigma \\
+a_{Nf} &= -D_f \frac{A_p}{d_{PN}} \\
+b_N &= V \ q_P^{(n-1)} 
+ +
+ \sum_f b_{Nf} \\
+b_{Nf} &= D_f \biggr[
+ \frac{ A_p }{d_{PN}} \biggr ( (\bnabla \phi)_N  -  (\bnabla \phi)_P \biggr)^{(n-1)}
+ \ \bigcdot \mathbf{F_iF} 
+ +
+  (\bnabla \phi)_{F_i}^{(n-1)} \bigcdot \mathbf{A}_t
+  \biggr].
+\end{aligned}
+\end{equation}
+\newline
+\noindent 
+The final process is to assemble this coefficient formulation for each cell $P$ where each index $N$ and $P$ maps to a given $i,j$ matrix or $i$ vector index. The methodology to obtain these $i,j$ indices requires some machinery to be developed relating to sparsity patterns which will be discussed next.
+
+\vspace{1cm}
+\subsection{Boundary conditions}
+\subsubsection{Dirichlet boundary conditions $\phi_N=\phi_B$}
+A Dirichlet boundary condition manifests in the $\mathbf{A}_f \bigcdot (D\bnabla \phi)_f$ term where we start with
+
+\beq 
+\mathbf{A}_f \bigcdot (\bnabla \phi)_f 
+=
+ \frac{A_p}{d_{PN}} \biggr ( \phi_{N} - \phi_{P} \biggr)^{(n)}
++  \frac{ A_p }{d_{PN}} \biggr ( (\bnabla \phi)_N  -  (\bnabla \phi)_P \biggr)^{(n-1)}
+\ \bigcdot \mathbf{F_iF} 
++
+ (\bnabla \phi)_{F_i}^{(n-1)} \bigcdot \mathbf{A}_t
+\eeq 
+\newline
+and note that the definition of $\mathbf{F_iF}$ requires the projection of $\mathbf{PF}$ onto $\mathbf{PN}$, however, in this case the vectors $\mathbf{PF}$ and $\mathbf{PN}$ are the same and therefore $\mathbf{F_i}$ equals $\mathbf{F}$ from which it follows that $\mathbf{F_iF}$ is zero in magnitude. We also know that $(\bnabla \phi)_{N}=0$ and therefore $ (\bnabla \phi)_{F_i}^{(n-1)}$ just becomes the projection of $(\bnabla \phi)_{P}$ to $\mathbf{F}$. Since  $(\bnabla \phi)_{P}$ is constant over the whole cell, $ (\bnabla \phi)_{F_i}^{(n-1)}$ is simply taken to be equal to $(\bnabla \phi)_{P}$ from which we now have
+
+\beq 
+\mathbf{A}_f \bigcdot (D\bnabla \phi)_f = 
+ D_f \biggr[
+ \frac{A_p}{d_{PN}} \biggr ( \phi_{B} - \phi_{P}^{(n)} \biggr) +
+  (\bnabla \phi)_{P}^{(n-1)} \bigcdot \mathbf{A}_t
+  \biggr]
+\eeq 
+\newline
+\noindent 
+Note the substitution of $\phi_N = \phi_B$, $D_f = D_P$, and the change to the iteration indices. This term then alters, for face $f^*$, the $a_{Nf}$ and $b_{Nf}$ coefficients in eq. \eqref{eq:fv_coeffs} as 
+
+\beq 
+a_{Nf^*} &= 0 \\
+b_{Nf^*} & =  D_{f^*} 
+\biggr[
+\frac{A_p}{d_{PN}} \phi_B + 
+(\bnabla \phi)_{P}^{(n-1)} \bigcdot \mathbf{A}_t
+\biggr] 
+\eeq 
+
+\vspace{0.5cm}
+\subsubsection{Neumann boundary conditions $\mathbf{A}_f \cdot (D\boldsymbol{\nabla} \phi)_f = F$}
+This type of a boundary condition specifies an area flux on face $f^*$ and reduces simply to the modifications
+
+\beq 
+a_P &= \sum_{\substack{f \\ f\ne f^*}} D_f \frac{A_p}{d_{PN}} + V\sigma\\
+a_{Nf^*} &= 0 \\
+b_{Nf^*} &= F
+\eeq 
+
+\vspace{0.5cm}
+\subsubsection{Robin boundary conditions $a\phi + b\mathbf{A}_f \cdot (D\boldsymbol{\nabla} \phi)_f = F$}
+A Robin-type boundary condition is a combination of a Dirichlet boundary condition and a Neumann boundary condition. It can be incorporated in the form
+
+\beq 
+\mathbf{A}_f \cdot (D\boldsymbol{\nabla} \phi)_f = \frac{F}{b} - \frac{a}{b} \phi_P
+\eeq 
+\newline 
+which requires the coefficients in \eqref{eq:fv_coeffs} to be altered, for face $f^*$, as
+
+\beq 
+a_P &= \sum_{\substack{f \\ f\ne f^*}} D_f \frac{A_p}{d_{PN}} + V\sigma + \frac{a}{b}\\
+a_{Nf} &= 0 \\
+b_{Nf} &= \frac{F}{b}
+\eeq 
+
+\newpage
+\subsection{Sparsity pattern}
+\subsubsection{Base block}
+The parallel sparsity pattern for matrix assembly requires \textbf{node ordering} in a single block-sense (base block) as depicted in Figure \ref{fig:discretizationbaseblockfv} below. The nodes are cell centered and the base blocks are dependent on the number of cells. The local base block size (i.e., number of entries) is the number of local cells and the global base block size is the total number of cells (globally). 
+\vspace{0.5cm}
+\begin{lstlisting}
+auto fv = new SpatialDiscretization_FV;
+spatial_discretization = fv;
+
+fv->AddViewOfLocalContinuum(grid);
+fv->AddViewOfNeighborContinuums(grid);
+fv->ReOrderNodes(grid);
+\end{lstlisting}
+\vspace{0.5cm}
+After nodal reordering all partition locations will have two populated arrays, \xmltag{locJ\_block\_address} and \xmltag{locJ\_block\_size}, indexed by partition-id (i.e., processor 15: \xmltag{locJ\_block\_address[15]} ). 
+
+The \xmltag{locJ\_block\_address} array contains the global address where each partition's base block starts and the \xmltag{locJ\_block\_size} array contains each partitions base block size.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\linewidth]{Figures/DiscretizationBaseBlockFV.eps}
+\caption{Base block node ordering for the Finite Volume discretization method.}
+\label{fig:discretizationbaseblockfv}
+\end{figure}
+
+\subsubsection{Multiblock}
+For mutliple degrees-of-freedom per node Chi-Tech supports two storage modes: Nodal and Block. Nodal-storage creates a block of unknowns per node, i.e., given a node address, the DOF-addresses will follow sequentially for each unknown. In contrast, Block-storage creates a block for each unknown, i.e., each block contains all the nodes but only a single unknown. The addressing scheme is determined as shown in Figure \ref{fig:discretizationcomponentblockfv} below which depicts 3 unknown (DOFs) per node. The color coding blue, green and red denotes the particular unknown, i.e., \textit{Velocity-x,y,z}, or \textit{Groups 0,1,2}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.0\linewidth]{Figures/DiscretizationComponentBlockFV}
+\caption{Addressing scheme for multiblock unknowns with the Finite Volume discretization method.}
+\label{fig:discretizationcomponentblockfv}
+\end{figure}
+
+
+\newpage
+\chead{Continuous Finite Element Method}
+\section{Continuous Finite Element Method}
+\subsection{Discretization}
+\subsubsection{Weak form}
+As a preface to the spatial discretization using CFEM and DFEM we first introduce the general weak form of the diffusion equation. We proceed with multiplying with $\varphi_i$, a function mapping eq. \eqref{eq:general_diffeq} to a trial space $\mathcal{D}_i$ for which we require that
 
 \begin{equation} \label{eq:trial}
 \int_{\bOmega_i} \biggr( 
--\varphi_i\nabla (D\nabla\phi) 
+-\varphi_i\bnabla \bigcdot (D\bnabla\phi) 
 \biggr).dV 
 + \int_{\bOmega_i} ( 
 \varphi_i\sigma_a  \phi 
@@ -171,26 +680,26 @@ In this equation we note that, from the product rule we have
 \int f\cdot \frac{dg}{dx}.dx
 \end{align*}
 \newline
-Applying this as an analogy with $f=\varphi$ and $g=D\nabla \phi$ we get
+Applying this as an analogy with $f=\varphi$ and $g=D\bnabla \phi$ we get the ``integration by parts" formulation 
 
 \begin{equation}\label{eq:IntegrateByParts}
 \begin{aligned}
-\int_{\bOmega_i} \nabla( \varphi_i D\nabla \phi) .dV&=
-\int_{\bOmega_i} \nabla \varphi_i\cdot D\nabla \phi.dV + 
-\int_{\bOmega_i} \varphi_i\cdot \nabla(D\nabla \phi).dV \\
+\int_{\bOmega_i} \bnabla \bigcdot ( \varphi_i D\bnabla \phi) .dV&=
+\int_{\bOmega_i} \bnabla \varphi_i\bigcdot D\bnabla \phi.dV + 
+\int_{\bOmega_i} \varphi_i \bnabla \bigcdot (D\bnabla \phi).dV \\
 \therefore
 -\int_{\bOmega_i} \biggr(
-\varphi_i\cdot \nabla(D\nabla \phi).dV
+\varphi_i \bnabla \bigcdot (D\bnabla \phi).dV
 \biggr) &=
-\int_{\bOmega_i} \nabla \varphi_i\cdot D\nabla \phi.dV
--\int_{\bOmega_i} \nabla( \varphi_i D\nabla \phi) .dV
+\int_{\bOmega_i} \bnabla \varphi_i \bigcdot D\bnabla \phi.dV
+-\int_{\bOmega_i} \bnabla \bigcdot ( \varphi_i D\bnabla \phi) .dV
 \end{aligned}
 \end{equation}
 \newline
 Now applying Gauss's Divergence theorem on the last term we have
 \begin{align}\label{eq:GaussDiv}
-\int_{\bOmega_i} \nabla( \varphi_i D\nabla \phi) .dV &=
-\int_{\partial \bOmega} \hat{n}\cdot \varphi_i D\nabla \phi . dA
+\int_{\bOmega_i} \bnabla \bigcdot ( \varphi_i D\bnabla \phi) .dV &=
+\int_{\partial \bOmega} \mathbf{n}\cdot \varphi_i D\bnabla \phi . dA
 \end{align}
 \newline
 which we can place in equation \ref{eq:IntegrateByParts} and then subsequently into equation \ref{eq:trial} which leads to the weak form
@@ -198,21 +707,20 @@ which we can place in equation \ref{eq:IntegrateByParts} and then subsequently i
 \begin{align}\label{eq:weakform}
 \Aboxed{
 \int_{\bOmega_i} \biggr(
-\nabla \varphi_i\cdot D\nabla \phi
+\bnabla \varphi_i\bigcdot D\bnabla \phi
 +
 \varphi_i\sigma_a  \phi 
 \biggr).dV 
 - 
 \int_{\partial \bOmega}\biggr( 
-\hat{n}\cdot \varphi_i D\nabla \phi 
+\mathbf{n}\cdot \varphi_i D\bnabla \phi 
 \biggr). dA
 = \int_{\bOmega_i} (\varphi_i q).dV
 }.
 \end{align}
 
 \newpage
-\chead{Basis functions}
-\section{Application of basis functions}
+\subsubsection{Application of basis functions}
 Consider $\phi$ approximated by the contributions of basis functions, $N_j$, and associated coefficients $\phi_j$, i.e.
 \begin{align}
 \phi \approx \phi_h = \sum_{j=0}^N \phi_j N_j.
@@ -227,13 +735,13 @@ Equation \ref{eq:weakform} now becomes
 \begin{align*}
 \begin{aligned}
 &\int_{\bOmega_i} \biggr(
-\nabla \varphi_i\cdot D\nabla (\sum_{j=0}^N \phi_j N_j)
+\bnabla \varphi_i\bigcdot D\bnabla (\sum_{j=0}^N \phi_j N_j)
 +
 \varphi_i\sigma_a  (\sum_{j=0}^N \phi_j N_j)
 \biggr).dV
 -
 \int_{\partial \bOmega}\biggr( 
-\mathbf{\hat{n}}\cdot \varphi_i D\nabla (\sum_{j=0}^N \phi_j N_j) 
+\mathbf{n}\bigcdot \varphi_i D\bnabla (\sum_{j=0}^N \phi_j N_j) 
 \biggr). dA
 \\
 &= \int_{\bOmega_i} \varphi_i q_c.dV + \int_{\bOmega_i} \varphi_i (\sum_{j=0}^N q_{nc,j} N_j).dV 
@@ -243,13 +751,13 @@ Equation \ref{eq:weakform} now becomes
 \begin{align*}
 \begin{aligned}
 &\int_{\bOmega_i} \biggr(
-\nabla \varphi_i\cdot D (\sum_{j=0}^N \phi_j \nabla N_j)
+\bnabla \varphi_i\bigcdot D (\sum_{j=0}^N \phi_j \bnabla N_j)
 + 
 \varphi_i\sigma_a  (\sum_{j=0}^N \phi_j N_j)
 \biggr).dV
 -
 \int_{\partial \bOmega}\biggr( 
-\mathbf{\hat{n}}\cdot \varphi_i D (\sum_{j=0}^N \phi_j \nabla N_j) 
+\mathbf{n}\bigcdot \varphi_i D (\sum_{j=0}^N \phi_j \bnabla N_j) 
 \biggr). dA 
 \\
 &= \int_{\bOmega_i} \varphi_i q_c.dV+
@@ -266,13 +774,13 @@ We now take into account that each integral over a trial space $\bOmega_i$ is a 
 \begin{aligned}
 &\sum^K \biggr[
 \int_{\bOmega_i} \biggr(
-\nabla \varphi_i\cdot D (\sum_{j=0}^N \phi_j \nabla N_j)
+\bnabla \varphi_i\bigcdot D (\sum_{j=0}^N \phi_j \bnabla N_j)
 +
 \varphi_i\sigma_a  (\sum_{j=0}^N \phi_j N_j)
 \biggr).dV
 -
 \int_{\partial \bOmega}\biggr( 
-\mathbf{\hat{n}}\cdot \varphi_i D (\sum_{j=0}^N \phi_j \nabla N_j) 
+\mathbf{n}\bigcdot \varphi_i D (\sum_{j=0}^N \phi_j \bnabla N_j) 
 \biggr). dA \biggr]
 \\
 &=\sum^K \biggr[
@@ -289,13 +797,13 @@ Rearranging
 \sum_{j=0}^N
  \biggr[
 \int_{\bOmega_i} \biggr(
-\nabla \varphi_i\cdot D ( \phi_j \nabla N_j)
+\bnabla \varphi_i\bigcdot D ( \phi_j \bnabla N_j)
 +
 \varphi_i\sigma_a  ( \phi_j N_j)
 \biggr).dV
 -
 \int_{\partial \bOmega}\biggr( 
-\mathbf{\hat{n}}\cdot \varphi_i D ( \phi_j \nabla N_j) 
+\mathbf{n}\cdot \varphi_i D ( \phi_j \bnabla N_j) 
 \biggr). dA \biggr]
 \\
 &=\sum^K 
@@ -318,13 +826,13 @@ Rearranging
 \sum_{j=0}^N \phi_j
  \biggr[ 
 D \int_{\bOmega_i} 
-\nabla \varphi_i \cdot  \nabla N_j.dV
+\bnabla \varphi_i \bigcdot  \bnabla N_j.dV
 +
 \sigma_a \int_{\bOmega_i}  \varphi_i N_j
 .dV
 -
-D \ \hat{n} \cdot \int_{\partial \bOmega}
- \varphi_i \nabla N_j
+D \ \mathbf{n} \bigcdot \int_{\partial \bOmega}
+ \varphi_i \bnabla N_j
 . dA \biggr]
 \\
 &=\sum^K 
@@ -348,13 +856,13 @@ By using the same shape functions for the test functions as was used for the bas
 \sum_{j=0}^N \phi_j
  \biggr[ 
 D \int_{\bOmega_i} 
-\nabla N_i \cdot  \nabla N_j.dV
+\bnabla N_i \bigcdot  \bnabla N_j.dV
 +
 \sigma_a \int_{\bOmega_i}  N_i N_j
 .dV
 -
-D \ \hat{n} \cdot \int_{\partial \bOmega}
- N_i \nabla N_j
+D \ \mathbf{n} \bigcdot \int_{\partial \bOmega}
+ N_i \bnabla N_j
 . dA \biggr]
 \\
 &=\sum^K 
@@ -372,22 +880,16 @@ D \ \hat{n} \cdot \int_{\partial \bOmega}
 \newline
 Computing the integrals of different combinations of the shape functions is specific to the type of element used, i.e. 1D slab, 2D triangle, 2D polygon, 3D tetrahedron, 3D polyhedron, etc. This information is contained in relevant whitepapers.
 
-\newpage
-\chead{CFEM}
-\section{Continuous Finite Element Method (CFEM)}
-
-The use of continuous basis functions, as well as the test functions being the same as the basis functions gives rise to the notion of a Galerkin method denoted as the Continous Finite Element Method (CFEM).
-
-\subsection{Assembling the linear system of equations}
+\subsubsection{Assembling the linear system of equations}
 With each trial space representing an equation, we can assemble a row of a matrix $A$ and an associated entry in the vector $\mathbf{b}$ as
  
 \vspace{0.25cm}
 \textbf{For each element k, for each DOF-$i$, for each DOF-$j$}
 \begin{equation}
 \begin{aligned}
-a_{ij} &=a_{ij} +  D \int_{\bOmega_i} \nabla N_i  \cdot  \nabla N_j .dV + 
+a_{ij} &=a_{ij} +  D \int_{\bOmega_i} \bnabla N_i  \cdot  \bnabla N_j .dV + 
 \sigma_a \int_{\bOmega_i} N_i N_j.dV -
-D \  \hat{n} \cdot \int_{\partial \bOmega} N_i  \nabla N_j .dA 
+D \  \mathbf{n} \cdot \int_{\partial \bOmega} N_i  \bnabla N_j .dA 
 \end{aligned}
 \end{equation}
 \begin{equation}
@@ -411,16 +913,16 @@ There are 2 primary types of boundary conditions implemented in ChiTech; \textbf
 A \textbf{Neumann} boundary condition takes the form
 
 \begin{equation*}
--D \hat{n} \cdot \nabla \phi = f \quad \quad \text{on } \partial \bOmega
+-D \mathbf{n} \cdot \bnabla \phi = f \quad \quad \text{on } \partial \bOmega
 \end{equation*}
 
 where $f$ represents a function. This representation is trivial to implement in the equation for $a_{ij}$ since it essentially means the integral on the boundary is a known and can hence be moved to the right hand side. Hence the equations to do so simply become
 
 \begin{equation*}
 \begin{aligned}
-a_{ij} &=a_{ij} +  D \int_{\bOmega_i} \nabla N_i  \cdot  \nabla N_j .dV + 
+a_{ij} &=a_{ij} +  D \int_{\bOmega_i} \bnabla N_i  \cdot  \bnabla N_j .dV + 
 \sigma_a \int_{\bOmega_i} N_i N_j.dV - \cancel{
-D \  \hat{n} \cdot \int_{\partial \bOmega} N_i  \nabla N_j .dA} \\
+D \  \mathbf{n} \cdot \int_{\partial \bOmega} N_i  \bnabla N_j .dA} \\
 b_i &= b_i 
 + q_{nc,j} \int_{\bOmega_i}  N_i  N_j .dV - f_j \int_{\partial\bOmega}  N_i  N_j .dA
 \end{aligned}
@@ -431,16 +933,16 @@ and the rest remaining untouched.
 In the case of a \textbf{Robin} boundary condition the form is similar;
 
 \begin{equation*}
-\alpha \phi+\beta D \hat{n} \cdot \nabla \phi = f \quad \quad \text{on } \partial \bOmega
+\alpha \phi+\beta D \mathbf{n} \cdot \bnabla \phi = f \quad \quad \text{on } \partial \bOmega
 \end{equation*}
 
 however, this time around there is a component still dependent on $\phi$ which must remain on the left hand side. The equations are
 
 \begin{equation*}
 \begin{aligned}
-a_{ij} &=a_{ij} +  D \int_{\bOmega_i} \nabla N_i  \cdot  \nabla N_j .dV + 
+a_{ij} &=a_{ij} +  D \int_{\bOmega_i} \bnabla N_i  \cdot  \bnabla N_j .dV + 
 \sigma_a \int_{\bOmega_i} N_i N_j.dV - \cancel{
-D \  \hat{n} \cdot \int_{\partial \bOmega} N_i  \nabla N_j .dA} 
+D \  \mathbf{n} \cdot \int_{\partial \bOmega} N_i  \bnabla N_j .dA} 
 + 
 \frac{\alpha}{\beta} \int_{\partial\bOmega} N_i N_j.dA\\
 b_i &= b_i 
@@ -454,7 +956,7 @@ With this notation we can see that by using a Robin boundary condition with $\al
 The versatility of this boundary condition can also be extended to \textbf{Vacuum} boundary conditions in neutron diffusion which take the form
 
 \begin{equation*}
-\frac{1}{4}\phi + \frac{1}{2}D\hat{n}\cdot\nabla\phi = 0 \quad \quad \text{on } \partial \bOmega
+\frac{1}{4}\phi + \frac{1}{2}D\mathbf{n}\cdot\bnabla\phi = 0 \quad \quad \text{on } \partial \bOmega
 \end{equation*}
 
 representing a zero incoming current. It is simple to see that using the values $\alpha = \frac{1}{4}$, $\beta=\frac{1}{2}$ and $f=0$ one can specify a vacuum boundary condition using a Robin boundary condition.
@@ -480,34 +982,43 @@ Now, it is fairly trivial in theory to apply this process, however, with the fin
 \newline
 In ChiTech the whole mess of Dirichlet boundary conditions is handled by modifying the element-by-element assembly process to never connect DOFs to the known dirichlet nodes. For a better understanding of how this is done please consult the coding implementation section.
 
-\vspace{0.5cm}
-\subsection{Coding implementation}
-Currently 3 different geometries are implemented in ChiTech. For each geometry a subtle difference needs to be implemented, however, the code sequence is essentially identical. As a reference we will use only a 2D polygon but the overall code implementation is the same for all geometries. Let us now consider a simple 2D arrangement of $4{\times}4$ cells as shown in Figure \ref{fig:fourbyfour} below. The solution is defined on the nodes of the mesh and cells are distributed on processors depicted with colors.
+\newpage
+\subsection{Sparsity pattern}
+\subsubsection{Base block}
+Let us now consider a simple 2D arrangement of $4{\times}4$ cells as shown in Figure \ref{fig:fourbyfour} below. For a continuous finite element method the solution is defined on the nodes of the mesh whereas the cells are distributed on processors depicted with colors. This brings some choice on which processor will own a given node when shared.
+
+\begin{lstlisting}
+auto pwl = new SpatialDiscretization_PWL(0,
+        chi_math::SpatialDiscretizationType::PIECEWISE_LINEAR_CONTINUOUS);
+spatial_discretization = pwl;    
+
+pwl->AddViewOfLocalContinuum(grid);
+pwl->OrderNodesCFEM(grid);
+\end{lstlisting}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.5\linewidth]{Figures/FourByFour}
+\includegraphics[width=0.5\linewidth]{Figures/DiscretizationBaseBlockCFEM.eps}
 \caption{Simple CFEM arrangement of cells colored by processor ownership.}
 \label{fig:fourbyfour}
 \end{figure}
-
-\subsubsection{Nodal Reordering}
-
-This cell and processor arrangement results in a very disjointed matrix representation which is problematic for most parallel implementations and also results in the matrix having a very large bandwidth. To remedy this a \textbf{CFEM nodal re-ordering} is applied to the nodes of the mesh (\xmltag{ReorderNodesPWLC}). This process is a two stage process:
+\noindent 
+Nodal re-ordering is applied to the nodes of the mesh with a call to (\xmltag{ReorderNodesPWLC}). This process is a two stage process:
 \newline
 \newline
 \textbf{Stage 1:}
 \begin{itemize}
-\item First all the nodes relevant to a process is collected into a set of exclusive and non-exclusive nodes. This involves a loop over all the degrees of freedom associated with a local cell.
-\item Another loop is executed over local cells, however, this time we loop over faces and face DOFs. If a face is on a process boundary then node indices associated with all the face DOFs are removed from the exclusive non-exclusive node set and placed in a ghost-node set.
+\item First all the nodes relevant to a process is collected into a set of exclusive and non-exclusive nodes. This involves a loop over all the nodes associated with a local cell.
+\item Another loop is executed over local cells, however, this time we loop over faces and then face nodes. If a face is on a process boundary then node indices associated with all the face nodes are flagged as being ghosted.
+\item Using the ghost flags, a list of exclusive nodes is creater as well as a list of non-exclusive nodes.
 \item A ring communication is then used to communicate all the ghost nodes from location $i$ to location $i+1$ with the last location ending up with the complete list of ghost nodes. 
 \item The last location then broadcasts the completed ghost node set to all other locations.
 \end{itemize}
 
 \textbf{Stage 2:}
 \begin{itemize}
-\item The ghost nodes is broken into $2P-2$ pieces (2 pieces per location, first and last location gets only 1 piece). If the amount of ghost nodes are not divisible they are stored as the remainder which will get subdivided between the first and last location.
-\item With this information in hand each processor can determine the portion of the matrix it owns provided it knows the starting row. At this point only the first processor knows its ownership start ... its row 0. Therefore we initiate another ring communication. Each location takes its starting location, adds the local exclusive nodes, then the portion of the ghost nodes its been given and then send the next location its starting location.
+\item The ghost nodes are broken into $2P-2$ pieces (2 pieces per location, first and last locations get only 1 piece). If the amount of ghost nodes are not divisible they are stored as the remainder which will get subdivided between the first and last location.
+\item With this information in hand each processor can determine the portion of the matrix it owns provided it knows the starting row. At this point only the first processor knows its ownership start ... its row 0. Therefore we initiate another ring communication. Each location takes its starting location, adds the local exclusive nodes, then the portion of the ghost nodes its been given and then sends the next location its starting location.
 \item Perform the mapping of original node indexes to distributed node indices.
 \end{itemize}
 
@@ -515,254 +1026,33 @@ This process can be visualized as depicted in Figure \ref{fig:CFEMReordering} be
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.9\linewidth]{Figures/CFEMReordering}
+\includegraphics[width=0.95\linewidth]{Figures/DiscretizationBaseBlockCFEMStages.eps}
 \caption{Stages of node ordering for CFEM.}
 \label{fig:CFEMReordering}
 \end{figure}
 
-\subsubsection{Catching nodes on Dirichlet boundaries}
-As was discussed in the previous section, the matrix assembly needs to be modified when nodes are on a Dirichlet boundary. Therefore we preprocess the faces to find nodes that are on such boundaries. Note that we loop over faces and only flag nodes if they are on a boundary.
-\newline
-\newline
-\textbf{Defined in }\xmltag{diffusion\_solver\_01c\_init\_pwlc.cc}
-\begin{lstlisting}[language=c++]
-//================================== Check if i is on boundary
-for (int i=0; i<poly_cell->v_indices.size(); i++)
-{
-	for (int e=0; e<poly_cell->edges.size(); e++)
-	{
-	  if (poly_cell->edges[e][2]<0)
-	  {
-	    int v0_index =
-	      mesher->MapNode(poly_cell->edges[e][0]);
-	    int v1_index =
-	      mesher->MapNode(poly_cell->edges[e][1]);
-	    if ((ir == v0_index) || (ir == v1_index))
-	    {
-	      int boundary_type =
-	        boundaries[abs(poly_cell->edges[e][2])-1]->type;
-	      if (boundary_type == DIFFUSION_DIRICHLET)
-	      {
-	        nodal_boundary_numbers[ir]=poly_cell->edges[e][2];
-	      }
-	      break;
-	    } //if ir part of face
-	  }
-	}
-}//for vertices i
-\end{lstlisting}
+\noindent
+After nodal reordering all partition locations will have three populated arrays, \xmltag{node\_mapping}, \xmltag{locJ\_block\_address} and \xmltag{locJ\_block\_size}. 
 
-\subsubsection{Estimating the sparsity pattern}
-In order to improve memory allocation efficiency it is important to have a good estimation of the sparsity pattern of the matrix, specifically the number of non-zeros per row. The estimation is perfect if we can exactly estimate the amount of non-zeros per row, not perfect but good if we over-estimate it and poor if we under-estimate it.
-\newline
-\newline
-\textbf{Defined in }\xmltag{diffusion\_solver\_01c\_init\_pwlc.cc}
-\begin{lstlisting}[language=c++]
-//======================================= Set nodal connections
-for (int i=0; i<poly_cell->v_indices.size(); i++)
-{
-	std::vector<int>* node_links = nodal_connections[ir];
-	for (int j=0; j<poly_cell->v_indices.size(); j++)
-	{
-	  int jr = mesher->MapNode(poly_cell->v_indices[j]);
-	
-	  //====================== Check for duplicates
-	  bool already_there = false;
-	  for (int k=0; k<node_links->size(); k++)
-	  {
-	    if ((*node_links)[k] == jr)
-	    {already_there = true; break;}
-	  }
-	  if (!already_there)
-	  {
-	    (*node_links).push_back(jr);
-	    if ((jr>=local_rows_from) && (jr<=local_rows_to))
-	    {
-	      nodal_nnz_in_diag[ir]+=1;
-	    } else
-	    {
-	      nodal_nnz_off_diag[ir]+=1;
-	    }
-	  }
-	}//for j
-}//for vertices i
-\end{lstlisting}
+The \xmltag{node\_mapping} array maps a global node to the new parallel ordering and is indexed by node global id whereas the latter two are indexed by partition-id (i.e., processor 15: \xmltag{locJ\_block\_address[15]} ). 
 
-After the sparsity pattern has been estimated the matrix preallocation is set using PETSc functions as follows
-\newline
-\newline
-\textbf{Defined in }\xmltag{diffusion\_solver\_01c\_init\_pwlc.cc}
-\begin{lstlisting}[language=c++]
-MatMPIAIJSetPreallocation(A,0,&nodal_nnz_in_diag[local_rows_from],
-                            0,&nodal_nnz_off_diag[local_rows_from]);
-MatSetOption(A, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE);
-MatSetOption(A,MAT_IGNORE_ZERO_ENTRIES,PETSC_TRUE);
-MatSetUp(A);
-\end{lstlisting}
+The \xmltag{locJ\_block\_address} array contains the global address where each partition's base block starts and the \xmltag{locJ\_block\_size} array contains each partitions base block size.
 
 
-\subsubsection{Assembling the matrix}
-As part of solver execution the process of assembling the matrix is conducted with reference to the type of geometry dealt with. Again we will be using a 2D polygon for reference. The \textbf{volume integrals} and dirichlet boundaries are developed using the following code
-\newline
-\newline
-\textbf{Defined in }\xmltag{diffusion\_solver\_02b\_0b\_polygon.cc}
-\begin{lstlisting}[language=c++]
-chi_mesh::CellPolygon* poly_cell = 
-   (chi_mesh::CellPolygon*)(cell);
-PolygonFEView* fe_view =
-   (PolygonFEView*)pwl_discr->MapFeView(cell_glob_index);
+\subsubsection{Multiblock}
+For multiple degrees-of-freedom per node Chi-Tech support two storage modes: Nodal and Block. Nodal-storage creates a block of unknowns per node, i.e., given a node address, the DOF-addresses will follow sequentially for each unknown. In contrast, Block-storage creates a block for each unknown, i.e., each
+block contains all the nodes but only a single unknown. Multiblock addressing is applied as shown
 
-//========================================= Loop over DOFs
-for (int i=0; i<fe_view->dofs; i++)
-{
-int ir = mesher->MapNode(poly_cell->v_indices[i]);
-
-int ir_boundary_type;
-if (!ApplyDirichletI(ir,&ir_boundary_type))
-{
-  //====================== Develop matrix entry
-  for (int j=0; j<fe_view->dofs; j++)
-  {
-    int jr =  mesher->MapNode(poly_cell->v_indices[j]);
-    double jr_mat_entry =
-      D*fe_view->IntV_gradShapeI_gradShapeJ[i][j];
-
-    jr_mat_entry +=
-      siga*fe_view->IntV_shapeI_shapeJ[i][j];
-
-    int jr_boundary_type;
-    if (!ApplyDirichletJ(jr,ir,jr_mat_entry,&jr_boundary_type))
-    {
-      MatSetValue(A,ir,jr,jr_mat_entry,ADD_VALUES);
-    }
-  }//for j
-
-  //====================== Develop RHS entry
-  double rhsvalue =0.0;
-  rhsvalue = q*fe_view->IntV_shapeI[i];
-  VecSetValue(b,ir,rhsvalue,ADD_VALUES);
-}//if ir not dirichlet
-
-}//for i
-\end{lstlisting}
-
-As can be seen in the above code, if DOF-$i$ is caught to be on a Dirichlet boundary it will be handled by the function \xmltag{ApplyDirichletI}.
-\newline
-\newline
-\textbf{Defined in }\xmltag{diffusion\_solver\_01\_general.cc}
-\begin{lstlisting}[language=c++]
-bool chi_diffusion::Solver::ApplyDirichletI(int ir,
-                                            int *ir_boundary_type,
-                                            int iref)
-{
-  int irefr = iref;
-  if (irefr<0)
-    irefr = ir;
-  //================= Check if i is on boundary
-  *ir_boundary_type = NO_BOUNDARY; //NO_BOUNDARY
-  int ir_boundary_index= 0;
-  if (nodal_boundary_numbers[irefr]<0)
-  {
-    ir_boundary_index = abs(nodal_boundary_numbers[irefr])-1;
-    *ir_boundary_type = boundaries[ir_boundary_index]->type;
-  }
-
-  if (*ir_boundary_type == DIFFUSION_DIRICHLET)
-  {
-    double ir_mat_entry =1.0;
-    MatSetValue(A,ir,ir,ir_mat_entry,ADD_VALUES);
-    auto dirich_bound =
-      (chi_diffusion::BoundaryDirichlet*)boundaries[ir_boundary_index];
-    double bvalue = dirich_bound->boundary_value;
-    VecSetValue(b,ir,bvalue,ADD_VALUES);
-    VecSetValue(x,ir,bvalue,INSERT_VALUES);
-
-    return true; //Applied
-  }
-  return false; //Not applied
-}
-\end{lstlisting}
-
-If a given row $i_r$ has a column connection to a node that is on a Dirichlet boundary then that matrix entry assembly is handled by \xmltag{ApplyDirichletJ}.
-\newline
-\newline
-\textbf{Defined in }\xmltag{diffusion\_solver\_01\_general.cc}
-\begin{lstlisting}[language=c++]
-bool chi_diffusion::Solver::ApplyDirichletJ(int jr,int ir,
-                                            double jr_mat_entry,
-                                            int *jr_boundary_type,int iref)
-{
-  int irefr = iref;
-  if (irefr<0)
-    irefr = jr;
-  //================= Check if j is on boundary
-  *jr_boundary_type = NO_BOUNDARY; //NO_BOUNDARY
-  int jr_boundary_index= 1;
-  if (nodal_boundary_numbers[irefr]<0)
-  {
-    jr_boundary_index = abs(nodal_boundary_numbers[irefr])-1;
-    *jr_boundary_type  = boundaries[jr_boundary_index]->type;
-  }
-
-  //================= If not dirichlet then
-  if (*jr_boundary_type == DIFFUSION_DIRICHLET)
-  {
-    auto dirich_bound =
-      (chi_diffusion::BoundaryDirichlet*)boundaries[jr_boundary_index];
-    double bvalue = -1*jr_mat_entry*dirich_bound->boundary_value;
-    VecSetValues(b,1,&ir,&bvalue,ADD_VALUES);
-
-    return true; //Applied
-  }//if dirichlet
-  return false; //Not applied
-}
-\end{lstlisting}
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.0\linewidth]{Figures/DiscretizationComponentBlockCFEM}
+\caption{Addressing scheme for multiblock unknowns with the CFEM discretization method.}
+\label{fig:discretizationcomponentblockcfem}
+\end{figure}
 
 
-\subsubsection{Solving the system}
-The rest of the process is common to all solvers. PETSc's GAMG is used as a preconditioner and since the matrix is Symmetric Positive Definite (SPD) the Conjugate Gradient solver provides us with superior performance.
-\newline
-\newline
-\textbf{Defined in }\xmltag{diffusion\_solver\_02a\_exec.cc}
-\begin{lstlisting}[language=c++]
-//================================================== Matrix symmetry check
-PetscBool is_symmetric;
-ierr = MatIsSymmetric(A,1.0e-4,&is_symmetric);
-if (!is_symmetric)
-{
-	chi_log.Log(LOG_0WARNING)
-	<< "Assembled matrix is not symmetric";
-}
 
-//================================================== Set up solver
-chi_log.Log(LOG_0) << "Diffusion Solver: Solving system\n";
-t_solve.Reset();
-
-ierr = KSPCreate(PETSC_COMM_WORLD,&ksp);
-ierr = KSPSetOperators(ksp,A,A);
-
-ierr = KSPGetPC(ksp,&pc);
-ierr = PCSetType(pc,PCGAMG);
-ierr = PCSetUp(pc);
-ierr = KSPSetType(ksp,KSPCG);
-ierr = KSPSetTolerances(ksp,1.e-50,residual_tolerance,1.0e50,100);
-
-
-//=================================== Set up monitor
-ierr = KSPMonitorSet(ksp,&chi_diffusion::KSPMonitorAChiTech,NULL,NULL);
-
-//=================================== Setup verbose viewer
-if (chi_log.GetVerbosity()>= LOG_0VERBOSE_2)
-	KSPView(ksp,PETSC_VIEWER_STDOUT_WORLD);
-
-//=================================== Execute solve
-ierr = KSPSetInitialGuessNonzero(ksp,PETSC_TRUE);
-ierr = KSPSetUp(ksp);
-ierr = KSPSolve(ksp,b,x);CHKERRQ(ierr);
-time_solve = t_solve.GetTime()/1000.0;
-\end{lstlisting}
-
-
+\newpage
 \section{CFEM verification}
 This section establishes a suite of test cases to verify the accurate implementation of the CFEM method. For each dimension we will restrict the domain $r \in [-1,1]$.
 
@@ -851,6 +1141,7 @@ The results are shown in Figure \ref{fig:Diffusion1c}.
 \end{figure}
 
 \newpage
+\chead{DFEM}
 \section{Modified Interior Penalty}
 Instead of a Continuous Finite Element Method (CFEM) discretization, 
 where the solution is defined on nodes, the Discontinuous Finite Element
@@ -1209,6 +1500,10 @@ for (int jmap=0; jmap<adj_fe_view->dofs; jmap++)
 \newpage
 \chead{References}
 \begin{thebibliography}{1}
+    
+    \bibitem{MMD} Moukalled F., Mangani L., Darwish M., {\em The Finite Volume Method in Computational Fluid Dynamics - An Advanced Introduction with OpenFOAM and Matlab}, Springer, 2016.
+    
+    \bibitem{Sezai} Sezai I., {\em Implementation of boundary conditions in pressure-based finite volume methods on unstructured grids}, Numerical Heat Transfer, Part B: Fundamentals, 2017
     
     \bibitem{blender} {\em Blender - a 3D modelling and rendering package}, Blender Online Community, Blender Foundation, Blender Institute, Amsterdam, 2018
     
