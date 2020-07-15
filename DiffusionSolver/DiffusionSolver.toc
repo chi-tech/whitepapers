@@ -1,0 +1,44 @@
+\nobreakspace {}\hfill \textbf {Page}\par 
+\contentsline {section}{\numberline {1}Introduction}{3}
+\contentsline {section}{\numberline {2}Finite Volume}{4}
+\contentsline {subsection}{\numberline {2.1}Discretization}{4}
+\contentsline {subsection}{\numberline {2.2}Discretization on Orthogonal grids}{5}
+\contentsline {subsubsection}{\numberline {2.2.1}Terminology}{5}
+\contentsline {subsubsection}{\numberline {2.2.2}Weighted harmonic mean of a quantity $D$ at a face}{5}
+\contentsline {subsubsection}{\numberline {2.2.3}Flux of a gradient}{5}
+\contentsline {subsubsection}{\numberline {2.2.4}Assembling the linear system}{5}
+\contentsline {subsection}{\numberline {2.3}Discretization on Unstructured grids}{7}
+\contentsline {subsubsection}{\numberline {2.3.1}Terminology}{7}
+\contentsline {subsubsection}{\numberline {2.3.2}Weighted harmonic mean of a quantity $D$ at a face}{7}
+\contentsline {subsubsection}{\numberline {2.3.3}Flux of a gradient}{8}
+\contentsline {subsubsection}{\numberline {2.3.4}Computing gradients using Green-Gauss}{9}
+\contentsline {subsubsection}{\numberline {2.3.5}Computing gradients using weighted Least-Squares}{10}
+\contentsline {subsubsection}{\numberline {2.3.6}Assembling the linear system}{10}
+\contentsline {subsection}{\numberline {2.4}Boundary conditions}{11}
+\contentsline {subsubsection}{\numberline {2.4.1}Dirichlet boundary conditions $\phi _N=\phi _B$}{11}
+\contentsline {subsubsection}{\numberline {2.4.2}Neumann boundary conditions $\mathbf {A}_f \cdot (D\boldsymbol {\nabla } \phi )_f = F$}{12}
+\contentsline {subsubsection}{\numberline {2.4.3}Robin boundary conditions $a\phi + b\mathbf {A}_f \cdot (D\boldsymbol {\nabla } \phi )_f = F$}{12}
+\contentsline {subsection}{\numberline {2.5}Sparsity pattern}{13}
+\contentsline {subsubsection}{\numberline {2.5.1}Base block}{13}
+\contentsline {subsubsection}{\numberline {2.5.2}Multiblock}{13}
+\contentsline {section}{\numberline {3}Continuous Finite Element Method}{15}
+\contentsline {subsection}{\numberline {3.1}Discretization}{15}
+\contentsline {subsubsection}{\numberline {3.1.1}Weak form}{15}
+\contentsline {subsubsection}{\numberline {3.1.2}Application of basis functions}{16}
+\contentsline {subsubsection}{\numberline {3.1.3}Assembling the linear system of equations}{17}
+\contentsline {subsection}{\numberline {3.2}Boundary conditions}{18}
+\contentsline {subsubsection}{\numberline {3.2.1}Robin and Neumann type boundary conditions}{18}
+\contentsline {subsubsection}{\numberline {3.2.2}Dirichlet type boundary conditions}{19}
+\contentsline {subsection}{\numberline {3.3}Sparsity pattern}{20}
+\contentsline {subsubsection}{\numberline {3.3.1}Base block}{20}
+\contentsline {subsubsection}{\numberline {3.3.2}Multiblock}{22}
+\contentsline {section}{\numberline {4}CFEM verification}{23}
+\contentsline {subsection}{\numberline {4.1}Slab 1D}{23}
+\contentsline {subsubsection}{\numberline {4.1.1}Dirichlet boundary conditions}{23}
+\contentsline {subsubsection}{\numberline {4.1.2}Reflecting boundary condition}{24}
+\contentsline {subsubsection}{\numberline {4.1.3}Vacuum boundary conditions}{25}
+\contentsline {section}{\numberline {5}Modified Interior Penalty}{27}
+\contentsline {subsection}{\numberline {5.1}Part A}{28}
+\contentsline {subsection}{\numberline {5.2}Part B}{29}
+\contentsline {subsection}{\numberline {5.3}Part C}{30}
+\contentsline {subsection}{\numberline {5.4}Assembling B and C}{30}
